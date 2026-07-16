@@ -1,0 +1,191 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  PATIENT
+  DOCTOR
+  RECEPTIONIST
+  SUPER_ADMIN
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+model User {
+  id             String    @id @default(uuid())
+  email          String    @unique
+  passwordHash   String
+  role           Role      @default(PATIENT)
+  firstName      String
+  lastName       String
+  phone          String?   @unique
+  profileImage   String?   // Cloudinary URL
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  // Relations
+  patientAppointments Appointment[] @relation("PatientAppointments")
+  doctorProfile       Doctor?
+  receptionistProfile Receptionist?
+  adminProfile        Admin?
+  auditLogs           AuditLog[]
+
+  @@index([email])
+  @@index([role])
+}
+
+model Doctor {
+  id               String    @id @default(uuid())
+  userId           String    @unique
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  specialization   String
+  qualification    String
+  experienceYears  Int
+  registrationNo   String    @unique
+  languages        String[]
+  consultationFee  Decimal   @db.Decimal(10, 2)
+  about            String?   @db.Text
+  isVerified       Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+
+  // Relations
+  clinicId         String
+  clinic           Clinic    @relation(fields: [clinicId], references: [id])
+  documents        DoctorDocument[]
+  availability     Availability[]
+  appointments     Appointment[] @relation("DoctorAppointments")
+
+  @@index([specialization])
+  @@index([isVerified])
+}
+
+model Clinic {
+  id          String    @id @default(uuid())
+  name        String
+  address     String
+  city        String
+  area        String
+  googleMaps  String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  // Relations
+  doctors     Doctor[]
+  receptionists Receptionist[]
+
+  @@index([city, area])
+}
+
+model Receptionist {
+  id        String    @id @default(uuid())
+  userId    String    @unique
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clinicId  String
+  clinic    Clinic    @relation(fields: [clinicId], references: [id])
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Admin {
+  id        String    @id @default(uuid())
+  userId    String    @unique
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Availability {
+  id             String    @id @default(uuid())
+  doctorId       String
+  doctor         Doctor    @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  dayOfWeek      Int       // 0 = Sunday, 6 = Saturday
+  startTime      String    // e.g., "09:00"
+  endTime        String    // e.g., "17:00"
+  lunchStart     String?   // e.g., "13:00"
+  lunchEnd       String?   // e.g., "14:00"
+  slotDuration   Int       // in minutes
+  maxPatients    Int?
+  isHoliday      Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([doctorId, dayOfWeek])
+}
+
+model Appointment {
+  id              String            @id @default(uuid())
+  patientId       String
+  patient         User              @relation("PatientAppointments", fields: [patientId], references: [id])
+  doctorId        String
+  doctor          Doctor            @relation("DoctorAppointments", fields: [doctorId], references: [id])
+  date            DateTime          @db.Date
+  startTime       String            // "10:30"
+  endTime         String            // "11:00"
+  reason          String?
+  status          AppointmentStatus @default(PENDING)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  deletedAt       DateTime?
+
+  // Relations
+  notifications   Notification[]
+
+  @@unique([doctorId, date, startTime]) // Prevents double booking at DB level
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([date])
+}
+
+model Notification {
+  id            String      @id @default(uuid())
+  appointmentId String
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  userId        String      // Recipient
+  title         String
+  message       String
+  isRead        Boolean     @default(false)
+  createdAt     DateTime    @default(now())
+
+  @@index([userId])
+}
+
+model DoctorDocument {
+  id          String   @id @default(uuid())
+  doctorId    String
+  doctor      Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  documentUrl String
+  type        String   // e.g., "LICENSE", "ID_PROOF"
+  isVerified  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action      String   // e.g., "UPDATE_APPOINTMENT", "DELETE_DOCTOR"
+  entity      String   // e.g., "Appointment", "Doctor"
+  entityId    String
+  details     Json?    // Stores what changed
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  @@index([entity, entityId])
+}
